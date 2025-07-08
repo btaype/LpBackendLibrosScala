@@ -21,6 +21,7 @@ libraryDependencies ++= Seq(
 libraryDependencies ++= Seq(
   "org.http4s" %% "http4s-ember-server" % "0.23.26",
   "org.http4s" %% "http4s-dsl" % "0.23.26",
+  
   "org.typelevel" %% "cats-effect" % "3.5.2",
   "com.typesafe.slick" %% "slick" % "3.4.1",
   "com.typesafe.slick" %% "slick-hikaricp" % "3.4.1",
@@ -34,6 +35,7 @@ libraryDependencies ++= Seq(
 libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.4.14"
 libraryDependencies += "com.zaxxer" % "HikariCP" % "5.0.0"
 libraryDependencies += "co.fs2" %% "fs2-io" % "3.9.3"
+libraryDependencies += "com.sun.mail" % "jakarta.mail" % "2.0.1"
 name := "hello-world"
 organization := "ch.epfl.scala"
 version := "1.0"

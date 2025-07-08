@@ -1,2 +1,5 @@
-[0m[[0m[33mwarn[0m] [0m[0m1 deprecation (since 2.10.0); re-run with -deprecation for details[0m
-[0m[[0m[33mwarn[0m] [0m[0mone warning found[0m
+[0m[[0m[31merror[0m] [0m[0mF:\LPFinal\Backend\src\main\scala\Model\ModelLibro.scala:205:8: value s is not a member of cats.effect.IO[String][0m
+[0m[[0m[31merror[0m] [0m[0mpossible cause: maybe a semicolon is missing before `value s`?[0m
+[0m[[0m[31merror[0m] [0m[0m      }s[0m
+[0m[[0m[31merror[0m] [0m[0m       ^[0m
+[0m[[0m[31merror[0m] [0m[0mone error found[0m

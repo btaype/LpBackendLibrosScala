@@ -10,26 +10,37 @@ import cats.effect.IO
 import java.nio.file.{Paths, Files, StandardOpenOption}
 import fs2.io.file.{Files => Fs2Files, Path => Fs2Path} 
 import org.http4s._
-
+import org.http4s.multipart._
 
 object PersonaRoutes {
-
+  
+  import io.circe.generic.auto._
+  import org.http4s.circe.CirceEntityEncoder._
+  import io.circe.syntax._ 
+   
   val rutas = HttpRoutes.of[IO] {
     
-    case req @ POST -> Root / "insertar_persona" =>
+    case req @ POST -> Root / "registrarcliente" =>
       for {
       
-        persona <- req.as[Persona]
+          persona <- req.as[Persona]
          _ <- IO(println(persona))
        
         val hashedPassword = PersonaQueries.hashPassword(persona.contrasena)
 
         
        
-         _ <- PersonaQueries.insertarPersona(persona.nombre, persona.rol, hashedPassword, persona.correo, persona.dni)
-       
-        response <- Ok(s"Persona ${persona.nombre} insertada exitosamente.")
-      } yield response
+        
+       resultado <- PersonaQueries.inserta_personas(persona.nombre, "cliente", hashedPassword, persona.correo, persona.dni)
+         res <- {
+          if (resultado.startsWith("OK"))
+
+            Ok(Map("ok" -> resultado).asJson)
+          else
+            BadRequest(Map("error" -> resultado).asJson)
+        }
+      } yield res
+      
   }
 }
 object ImagenRoutes {
@@ -37,12 +48,18 @@ object ImagenRoutes {
   val rutas = HttpRoutes.of[IO] {
     case req @ POST -> Root / "upload" / nombre =>
       for {
-        bytes <- req.body.compile.to(Array)
-        _ <- IO {
-          val ruta = Paths.get(s"uploads/$nombre")
-          
-          Files.createDirectories(ruta.getParent)
-          Files.write(ruta, bytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
+        multipart <- req.as[Multipart[IO]] 
+        _ <- multipart.parts.headOption match {
+          case Some(part) =>
+            part.body.compile.to(Array).flatMap { bytes =>
+              IO {
+                val ruta = Paths.get(s"uploads/$nombre")
+                Files.createDirectories(ruta.getParent)
+                Files.write(ruta, bytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
+              }
+            }
+          case None =>
+            IO.raiseError(new Exception("No se encontró archivo en el formulario"))
         }
         res <- Ok(s"Imagen $nombre guardada con éxito")
       } yield res
@@ -71,19 +88,27 @@ object DocumentoRoutes {
   }
 }
 object LibroRoutes {
+  import io.circe.syntax._                         
+  import org.http4s.circe.CirceEntityEncoder._  
   val rutas = HttpRoutes.of[IO] {
     case req @ POST -> Root / "insertar_libro" =>
-      for {
+    for {
         libro <- req.as[Libro]
-        resultado <- LibroQueries.insertarLibro(
-          libro.nombre,
-          libro.precio,
-          libro.idCategoria,
-          libro.nombrePdf,
-          libro.nombreImagen
+        resultado <- LibroQueries.insert_libro(
+        libro.nombre,
+
+        libro.precio,
+
+        libro.id_categoria,
+        libro.nombrepdf,
+        libro.nombreimagen  
+
         )
-        res <- Ok(resultado)
-      } yield res
+         res <- if (resultado)
+               Ok(Map( "ok" -> "Libro insertado Correctamente").asJson)
+             else
+               BadRequest(Map("error" -> "No se pudo insertar el libro").asJson)
+    } yield res
   }
 }
 
@@ -108,25 +133,220 @@ object CategoriaRoutes {
   import org.http4s.circe.CirceEntityEncoder._
 
   val rutas = HttpRoutes.of[IO] {
-    case GET -> Root / "categorias" =>
+    case GET -> Root / "obtener_categoria" =>
       for {
-        categorias <- LibroQueries.obtenerCategorias()
+        categorias <- LibroQueries.obtener_categorias()
         res <- Ok(categorias)
       } yield res
   }
 }
 object LoginRoutes {
-   import io.circe.generic.auto._
+     import io.circe.generic.auto._
   import org.http4s.circe.CirceEntityEncoder._
+  import io.circe.syntax._ 
+
   val rutas = HttpRoutes.of[IO] {
     case req @ POST -> Root / "login" =>
       for {
         login <- req.as[LoginRequest]
-        resultado <- PersonaQueries.loginPersona(login.correo, login.contrasena)
+        resultado <- PersonaQueries.login_ersona(login.correo, login.contrasena)
         res <- resultado match {
           case Right(persona) => Ok(persona)
-          case Left(error) => Forbidden(error)
+          case Left(error) => BadRequest(Map("error" -> error).asJson)
         }
       } yield res
+  }
+}
+object eliminar_libros_routes {
+
+  import io.circe.generic.auto._
+  import org.http4s.circe.CirceEntityEncoder._
+   import io.circe.syntax._ 
+
+  val rutas = HttpRoutes.of[IO] {
+       case req @ DELETE -> Root / "eliminar_libro"   =>
+      val id_libro = req.uri.query.params.get("id_libro").flatMap(id => scala.util.Try(id.toInt).toOption)
+       id_libro match {
+        case Some(id) =>
+      for {
+        resultado <- LibroQueries.delete_libro(id)
+        res <- if (resultado)
+                 Ok(Map("ok" -> s"Libro eliminado Correctamente").asJson)
+               else
+
+                 BadRequest(Map("error" -> s"no se pudo eliminar el Libro ").asJson)
+      } yield res
+      case None =>
+          BadRequest(Map("error" -> "el parametro es invalido").asJson)
+      }
+  }
+}
+object Reportesdeadmin {
+
+  import io.circe.generic.auto._
+  import org.http4s.circe.CirceEntityEncoder._
+   import io.circe.syntax._ 
+   
+  val rutas = HttpRoutes.of[IO] {
+       case req @ GET -> Root / "reporte"   =>
+      val mes = req.uri.query.params.get("mes").flatMap(id => scala.util.Try(id.toInt).toOption)
+      val anio = req.uri.query.params.get("anio").flatMap(id => scala.util.Try(id.toInt).toOption)
+
+          (mes, anio) match {
+        case (Some(m), Some(a)) =>
+          for {
+            resultado <- LibroQueries.reportes(m, a)
+            res <- {
+              val json = if (resultado.isEmpty) {
+                
+                Respuesta_reporte(Seq.empty, BigDecimal(0)).asJson
+
+              } else {
+                  Respuesta_reporte(resultado, resultado.head.total_ventas).asJson
+              }
+              Ok(json)
+            }
+          } yield res
+
+        case _ =>
+            BadRequest(Map("error" -> "el parametro es invlido").asJson)
+      }
+  }
+}
+object A_admin {
+  
+  import io.circe.generic.auto._
+  import org.http4s.circe.CirceEntityEncoder._
+  import io.circe.syntax._ 
+   
+  val rutas = HttpRoutes.of[IO] {
+    
+    case req @ POST -> Root / "registraradmin" =>
+      for {
+      
+          persona <- req.as[Persona]
+         _ <- IO(println(persona))
+       
+        val hashedPassword = PersonaQueries.hashPassword(persona.contrasena)
+
+        
+       
+        
+       resultado <- PersonaQueries.inserta_personas(persona.nombre, "admin", hashedPassword, persona.correo, persona.dni)
+         res <- {
+          if (resultado.startsWith("OK"))
+
+            Ok(Map("ok" -> resultado).asJson)
+          else
+            BadRequest(Map("error" -> resultado).asJson)
+        }
+      } yield res
+      
+  }
+}
+
+object Paginapricipal {
+
+  import io.circe.generic.auto._
+  import org.http4s.circe.CirceEntityEncoder._
+   import io.circe.syntax._ 
+   
+  val rutas = HttpRoutes.of[IO] {
+       case req @ GET -> Root / "pagina_principal"   =>
+     
+
+          for {
+            resultado <- LibroQueries.paginap()
+            res <- {
+              val json = if (resultado.isEmpty) {
+                
+                 Seq.empty[Pagina_principal].asJson
+
+              } else {
+                  resultado.asJson
+              }
+              Ok(json)
+            }
+          } yield res
+
+        
+      }
+  
+}
+
+object Comprarlibros {
+
+  import io.circe.generic.auto._
+  import org.http4s.circe.CirceEntityEncoder._
+  import io.circe.syntax._
+  import cats.effect.IO
+  import org.http4s._
+
+  val rutas = HttpRoutes.of[IO] {
+    case req @ POST -> Root / "comprar" =>
+      (for {
+        datos <- req.as[Comprarlibross]
+          .handleErrorWith(e =>
+            IO.raiseError(new RuntimeException(s"json invalido: ${e.getMessage}"))
+          )
+
+        _ <- if (datos.id_libro <= 0 || datos.id_persona <= 0 || datos.numero.isEmpty || datos.cvv_numero.isEmpty
+
+        ) IO.raiseError(new RuntimeException("los datos son invalidos"))
+        else IO.unit
+
+        resultado <- LibroQueries.comprar_libro(
+          datos.id_libro, datos.id_persona, datos.numero, datos.cvv_numero
+        )
+
+        _ <- if (resultado.startsWith("OK")) {
+          LibroQueries.obtener_correos_pdf(datos.id_persona, datos.id_libro).flatMap {
+            case Some(info) =>
+
+              Enviar_correo.enviar_libro_coreo(info.correo, info.nombrePDF)
+                .handleErrorWith(_ => IO.unit)
+            case None => IO.unit
+          }
+
+        } else IO.unit
+
+        res <- if (resultado.startsWith("OK"))
+          Ok(Map("ok" -> resultado).asJson)
+        else
+          BadRequest(Map("error" -> resultado).asJson)
+
+      } yield res).handleErrorWith(e =>
+        InternalServerError(Map(
+          "error" -> "Error interno del servidor",
+          "detalle" -> e.getMessage
+        ).asJson)
+      )
+  }
+}
+
+object Paginafillter {
+  import io.circe.generic.auto._
+  import org.http4s.circe.CirceEntityEncoder._
+   import io.circe.syntax._ 
+  val rutas = HttpRoutes.of[IO] {
+    case req @ GET -> Root / "obtener_librosfiltro" =>
+      val idcat = req.uri.query.params.get("id_categoria").flatMap(s => scala.util.Try(s.toInt).toOption)
+      
+      val preciomin =   req.uri.query.params.get("precio_minimo").flatMap(s => scala.util.Try(BigDecimal(s)).toOption)
+
+      val preciomax = req.uri.query.params.get("precio_maximo").flatMap(s => scala.util.Try(BigDecimal(s)).toOption)
+      val ordenn  =  req.uri.query.params.get("orden").flatMap(s => scala.util.Try(s.toBoolean).toOption)
+
+      (idcat, preciomin, preciomax, ordenn) match {
+        case (Some(id_cat), Some(precio_min), Some(precio_max), Some(orden)) =>
+          for {
+            resultado <- LibroQueries.paginafiltro(id_cat, precio_min, precio_max, orden)
+            
+             res <- Ok(resultado.asJson)
+          } yield res
+
+        case _ =>
+          BadRequest(Map("error" -> "no se pudo filtrar datos, revisar el las entrdas de filtro").asJson)
+      }
   }
 }
